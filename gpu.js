@@ -81,19 +81,40 @@ export class GpuHasher {
     });
     this.cachedJob = "";
     this.reset = new Uint32Array([0xffffffff, 0, 0, 0, 0, 0]);
+    // Prefix words are cached across batches with the same job.
+    this.prefixWords = new Uint32Array(16);
+    this.targetWords = [0, 0, 0, 0, 0];
   }
 
   static async create(selectedAdapter = null, options = {}) {
     if (!navigator.gpu) {
-      throw new Error("WebGPU is unavailable. Open this page in a recent Chrome or Chromium on localhost.");
+      throw new Error(
+        "WebGPU is unavailable. Open this page in a recent Chrome, Edge or Chromium " +
+        "on localhost or a secure HTTPS origin."
+      );
     }
-    const adapter = selectedAdapter || await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
-    if (!adapter) throw new Error("No WebGPU adapter was found. Check browser GPU settings and drivers.");
+    const adapter = selectedAdapter ||
+      await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+    if (!adapter) {
+      throw new Error(
+        "No high-performance WebGPU adapter was found. " +
+        "Check chrome://gpu and your GPU drivers, then try again."
+      );
+    }
+    if (adapter.limits?.maxComputeWorkgroupStorageSize !== undefined &&
+        adapter.limits.maxComputeWorkgroupStorageSize < 16384) {
+      throw new Error(
+        "The WebGPU adapter reports less than 16 KB of workgroup storage. " +
+        "The SHA-1 shader cannot run on this device."
+      );
+    }
     const device = await adapter.requestDevice();
     const vendor = (device.adapterInfo?.vendor || adapter.info?.vendor || "").toLowerCase();
-    const supports256 = device.limits.maxComputeWorkgroupSizeX >= 256 &&
-      device.limits.maxComputeInvocationsPerWorkgroup >= 256;
-    const workgroupSize = options.workgroupSize ?? (vendor === "nvidia" && supports256 ? 256 : DEFAULT_WORKGROUP_SIZE);
+    const limits = device.limits;
+    const supports256 = limits.maxComputeWorkgroupSizeX >= 256 &&
+      limits.maxComputeInvocationsPerWorkgroup >= 256;
+    const workgroupSize = options.workgroupSize ??
+      (vendor === "nvidia" && supports256 ? 256 : DEFAULT_WORKGROUP_SIZE);
     const hasher = new GpuHasher(device, { ...options, workgroupSize });
     hasher.adapterInfo = device.adapterInfo || adapter.info || null;
     // Compile every nonce length up front; the pool range always starts at nonce 0.
@@ -107,7 +128,8 @@ export class GpuHasher {
       const { code, plan } = buildShader(digits, { workgroupSize: this.workgroupSize });
       const promise = (async () => {
         const module = this.device.createShaderModule({ code });
-        const errors = (await module.getCompilationInfo()).messages.filter(message => message.type === "error");
+        const errors = (await module.getCompilationInfo()).messages
+          .filter(message => message.type === "error");
         if (errors.length) throw new Error(`GPU shader error: ${errors[0].message}`);
         const pipeline = await this.device.createComputePipelineAsync({
           layout: this.pipelineLayout,
@@ -115,6 +137,7 @@ export class GpuHasher {
         });
         return { pipeline, plan };
       })();
+      // If a pipeline fails to build, clear the cache so a later call can retry.
       promise.catch(() => this.pipelines.delete(digits));
       this.pipelines.set(digits, promise);
     }
@@ -165,18 +188,26 @@ export class GpuHasher {
   }
 
   writeJob(prefix, target) {
+    // Pool responses are usually lowercase hex, but the spec allows uppercase.
+    // Normalise here so the cached job key, the byte packing, and the target words
+    // all agree with the shader's expectation of lowercase ASCII.
+    prefix = String(prefix).toLowerCase();
+    target = String(target).toLowerCase();
     const jobKey = `${prefix}:${target}`;
     if (jobKey === this.cachedJob) return;
-    if (!/^[0-9a-f]{40}$/i.test(prefix)) throw new Error("Invalid previous hash from pool.");
-    if (!/^[0-9a-f]{40}$/i.test(target)) throw new Error("Invalid target hash from pool.");
-    this.prefixWords = new Uint32Array(16);
+    if (!/^[0-9a-f]{40}$/.test(prefix)) throw new Error("Invalid previous hash from pool.");
+    if (!/^[0-9a-f]{40}$/.test(target)) throw new Error("Invalid target hash from pool.");
     for (let i = 0; i < 10; i++) {
       const at = i * 4;
-      this.prefixWords[i] = (prefix.charCodeAt(at) << 24) |
+      this.prefixWords[i] =
+        (prefix.charCodeAt(at) << 24) |
         (prefix.charCodeAt(at + 1) << 16) |
-        (prefix.charCodeAt(at + 2) << 8) | prefix.charCodeAt(at + 3);
+        (prefix.charCodeAt(at + 2) << 8) |
+        prefix.charCodeAt(at + 3);
     }
-    this.targetWords = Array.from({ length: 5 }, (_, i) => parseInt(target.slice(i * 8, i * 8 + 8), 16));
+    for (let i = 0; i < 5; i++) {
+      this.targetWords[i] = parseInt(target.slice(i * 8, i * 8 + 8), 16) >>> 0;
+    }
     this.cachedJob = jobKey;
   }
 
@@ -198,7 +229,8 @@ export class GpuHasher {
   // submitted in call order, so the caller can queue the next batch before awaiting.
   hashBatch(prefix, target, start, count) {
     if (!Number.isSafeInteger(start) || start < 0 || start > MAX_NONCE ||
-        !Number.isInteger(count) || count < 1 || count > BATCH_SIZE || start + count - 1 > MAX_NONCE) {
+        !Number.isInteger(count) || count < 1 || count > BATCH_SIZE ||
+        start + count - 1 > MAX_NONCE) {
       return Promise.reject(new Error("Invalid GPU nonce range."));
     }
     const submitted = this.queueTail.then(() => this.submitBatch(prefix, target, start, count));
@@ -215,7 +247,8 @@ export class GpuHasher {
     const dispatches = [];
     for (const [index, row] of rows.entries()) {
       const { pipeline, plan } = await this.pipeline(row.digits);
-      packRow(this.rowData, index * ROW_WORDS, plan, this.rowWords(row.digits, row.high), this.targetWords, row);
+      packRow(this.rowData, index * ROW_WORDS, plan,
+        this.rowWords(row.digits, row.high), this.targetWords, row);
       const invocations = row.vLast - row.vFirst + 1;
       const last = dispatches.at(-1);
       if (last && last.pipeline === pipeline) {
@@ -232,7 +265,10 @@ export class GpuHasher {
     for (const dispatch of dispatches) {
       pass.setPipeline(dispatch.pipeline);
       pass.setBindGroup(0, this.bindGroup, [dispatch.first * ROW_WORDS * 4]);
-      pass.dispatchWorkgroups(Math.ceil(dispatch.invocations / this.workgroupSize), dispatch.rows);
+      pass.dispatchWorkgroups(
+        Math.ceil(dispatch.invocations / this.workgroupSize),
+        dispatch.rows
+      );
     }
     pass.end();
     encoder.copyBufferToBuffer(this.output, 0, readback.buffer, 0, RESULT_WORDS * 4);
@@ -242,7 +278,9 @@ export class GpuHasher {
       readback.buffer.unmap();
       return {
         found: words[0] === 0xffffffff ? null : start + words[0],
-        sample: [...words.slice(1)].map(word => word.toString(16).padStart(8, "0")).join(""),
+        sample: [...words.slice(1)]
+          .map(word => word.toString(16).padStart(8, "0"))
+          .join(""),
         count,
         start,
       };

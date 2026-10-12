@@ -261,3 +261,148 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+/* =========================================================
+   DUCO GPU Lab — Extended UI
+   ========================================================= */
+
+/* Top bar icon buttons */
+.icon-button {
+  display: grid;
+  place-items: center;
+  min-width: 34px;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  transition: color var(--motion), border-color var(--motion), background-color var(--motion);
+}
+.icon-button:hover { color: var(--text); border-color: var(--muted); background: var(--panel); }
+
+/* Panel action group */
+.panel-actions { display: flex; gap: var(--space-3); align-items: center; }
+
+/* Section divider inside session panel */
+.section-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 var(--space-2);
+  color: var(--quiet);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+}
+.section-divider::before,
+.section-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+/* Share history panel */
+.shares-panel { border-top: 1px solid var(--line); }
+.share-history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+  scrollbar-color: var(--line) var(--bg);
+}
+.share-row {
+  display: grid;
+  grid-template-columns: 72px 56px minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--muted);
+}
+.share-row time { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--quiet); }
+.share-row code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+.share-status {
+  justify-self: start;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .06em;
+}
+.share-row.accepted .share-status { color: var(--green); border-color: #4c7664; }
+.share-row.rejected .share-status { color: var(--red); border-color: #7a4b52; }
+.share-meta { color: var(--quiet); font-size: 12px; text-align: right; white-space: nowrap; }
+.share-empty { padding: var(--space-3) 0; color: var(--quiet); font-size: 13px; list-style: none; }
+
+/* Chart tooltip */
+.chart-tooltip {
+  position: absolute;
+  top: 4px;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .35);
+}
+.chart-tooltip[hidden] { display: none; }
+
+/* Toggle rows in settings */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 44px;
+  margin-top: var(--space-2);
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+.toggle-row input { flex: none; width: 18px; height: 18px; margin: 0; accent-color: var(--orange); }
+
+/* Lifetime stats */
+.lifetime-stats dt, .lifetime-stats dd { font-size: 13px; }
+
+/* Help dialog */
+.help-dialog {
+  width: min(520px, calc(100vw - 32px));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  padding: 0;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+}
+.help-dialog::backdrop { background: rgba(0, 0, 0, .55); backdrop-filter: blur(2px); }
+.help-content { padding: var(--space-6); }
+.help-content .panel-heading { padding: 0 0 var(--space-4); }
+.shortcut-list { margin: 0; }
+.shortcut-list > div {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: baseline;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+}
+.shortcut-list dt { color: var(--text); }
+.shortcut-list dd { margin: 0; color: var(--muted); }
+.help-note { margin: var(--space-4) 0 0; color: var(--quiet); font-size: 12px; }
+
+@media (max-width: 680px) {
+  .icon-button { display: none; }
+  .shortcut-hint { display: none; }
+  .share-row { grid-template-columns: 62px 50px minmax(0, 1fr); }
+  .share-meta { grid-column: 1 / -1; text-align: left; }
+}

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101316">
-  <meta name="description" content="DUCO GPU Lab is an experimental WebGPU Duino-Coin miner with live hashrate and pool results.">
+  <meta name="description" content="DUCO GPU Lab is an experimental WebGPU Duino-Coin miner with live hashrate, share history, and pool results.">
   <title>DUCO GPU Lab</title>
   <link rel="icon" type="image/svg+xml" href="./favicon.svg">
   <link rel="stylesheet" href="./style.css">
@@ -14,7 +14,11 @@
   <div class="shell">
     <header class="topbar">
       <div class="brand"><span class="brand-mark" aria-hidden="true">D</span><span>DUCO <strong>GPU Lab</strong></span></div>
-      <div class="topbar-device"><div class="gpu-identity"><span>SELECTED GPU</span><strong id="gpuName" title="Detecting GPU">Detecting GPU</strong></div><span id="gpuSupport" class="support-pill">Checking GPU</span></div>
+      <div class="topbar-device">
+        <div class="gpu-identity"><span>SELECTED GPU</span><strong id="gpuName" title="Detecting GPU">Detecting GPU</strong></div>
+        <span id="gpuSupport" class="support-pill">Checking GPU</span>
+        <button id="helpButton" class="icon-button" type="button" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
+      </div>
     </header>
 
     <aside class="project-notice" role="alert" aria-label="Experimental project notice">
@@ -34,7 +38,7 @@
             <button id="stopButton" class="secondary-button" type="button" disabled title="Stop mining (Space or Esc)">Stop</button>
           </div>
           <div class="session-state" role="status" aria-live="polite"><span id="statusDot" class="status-dot"></span><span id="statusText">Ready to mine</span></div>
-          <small class="shortcut-hint">Press <kbd>Space</kbd> to start or stop, <kbd>Esc</kbd> to stop.</small>
+          <small class="shortcut-hint">Press <kbd>Space</kbd> to start or stop, <kbd>Esc</kbd> to stop, <kbd>?</kbd> for shortcuts.</small>
         </div>
       </section>
 
@@ -49,7 +53,11 @@
         <div class="main-column">
           <section class="panel performance-panel" aria-labelledby="performanceTitle">
             <div class="panel-heading"><div><p class="section-kicker">PERFORMANCE</p><h2 id="performanceTitle">Hashrate over time</h2></div><span class="chart-chip"><span class="live-dot"></span> Live</span></div>
-            <div class="chart-wrap"><canvas id="rateChart" aria-label="Recent hashrate history"></canvas><div class="chart-empty" id="chartEmpty">Your hashrate will appear here after mining starts.</div></div>
+            <div class="chart-wrap">
+              <canvas id="rateChart" aria-label="Recent hashrate history"></canvas>
+              <div class="chart-empty" id="chartEmpty">Your hashrate will appear here after mining starts.</div>
+              <output id="chartTooltip" class="chart-tooltip" hidden></output>
+            </div>
             <div class="chart-footer"><span>LAST 60 SECONDS</span><span id="peakRate">PEAK 0 H/s</span></div>
             <div class="job-stats"><div><span>Pool difficulty</span><strong id="difficulty">0</strong></div><div><span>Current nonce</span><strong id="currentNonce">0</strong></div></div>
           </section>
@@ -86,6 +94,16 @@
               </div>
             </div>
           </details>
+
+          <section class="panel shares-panel" aria-labelledby="sharesTitle">
+            <div class="panel-heading">
+              <div><p class="section-kicker">RECENT SHARES</p><h2 id="sharesTitle">Share history</h2></div>
+              <span class="chart-chip" id="shareCount">0 shares</span>
+            </div>
+            <ol id="shareHistory" class="share-history" aria-live="polite">
+              <li class="share-empty">No shares submitted yet. Start mining to see results here.</li>
+            </ol>
+          </section>
         </div>
 
         <aside class="side-column">
@@ -94,7 +112,13 @@
             <div class="field"><label for="username">Duino-Coin username</label><input id="username" name="username" autocomplete="username" spellcheck="false" maxlength="32" required></div>
             <div class="field"><label for="miningKey">Mining key (optional)</label><input id="miningKey" name="miningKey" type="password" autocomplete="off" spellcheck="false" maxlength="128"><small>Only needed if your account uses a mining key.</small></div>
             <div class="field"><label for="batchSize">GPU batch size</label><div class="batch-control-row"><select id="batchSize" aria-describedby="batchHint"><option value="65536">65,536 hashes, light</option><option value="262144">262,144 hashes, moderate</option><option value="1048576">1,048,576 hashes</option><option value="4194304">4,194,304 hashes</option><option value="8388480">8,388,480 hashes</option><option value="16776960" selected>16,776,960 hashes, conservative</option><option value="33553920">33,553,920 hashes</option><option value="67107840">67,107,840 hashes</option><option value="100661760">100,661,760 hashes</option><option value="134215680">134,215,680 hashes</option><option value="201323520">201,323,520 hashes</option><option value="268431360">268,431,360 hashes, powerful GPU</option><option value="536862720">536,862,720 hashes, very fast GPU</option></select><label class="auto-batch-toggle"><input id="autoBatch" type="checkbox" aria-describedby="batchHint" checked><span>Auto</span></label></div><small id="batchHint">Auto adjusts the selected size toward 55 to 95 ms per full batch. Stop waits for the current batch.</small></div>
-            <details class="advanced"><summary>More settings</summary><div class="field"><label for="rigName">Rig name</label><input id="rigName" name="rigName" value="WebGPU-Lab" maxlength="32" spellcheck="false"></div><div class="field"><label for="poolUrl">Pool API URL</label><input id="poolUrl" name="poolUrl" value="https://server.duinocoin.com" spellcheck="false"></div></details>
+            <details class="advanced">
+              <summary>More settings</summary>
+              <div class="field"><label for="rigName">Rig name</label><input id="rigName" name="rigName" value="WebGPU-Lab" maxlength="32" spellcheck="false"></div>
+              <div class="field"><label for="poolUrl">Pool API URL</label><input id="poolUrl" name="poolUrl" value="https://server.duinocoin.com" spellcheck="false"><small>Separate multiple URLs with commas for automatic failover.</small></div>
+              <label class="toggle-row"><input id="notificationsEnabled" type="checkbox"><span>Desktop notifications on share results</span></label>
+              <label class="toggle-row"><input id="soundEnabled" type="checkbox"><span>Sound alerts on share results</span></label>
+            </details>
             <p class="setup-note">Enter a username, then press Start. All settings are saved in this browser.</p>
           </section>
 
@@ -102,14 +126,48 @@
             <div class="panel-heading"><div><p class="section-kicker">SESSION</p><h2 id="sessionTitle">Pool status</h2></div></div>
             <dl class="session-list"><div><dt>Uptime</dt><dd id="uptime">00:00:00</dd></div><div><dt>Last share</dt><dd id="lastShare">--</dd></div><div><dt>Acceptance</dt><dd id="acceptance">--</dd></div><div><dt>Last match</dt><dd id="lastMatch">None yet</dd></div></dl>
             <details class="connection-details"><summary>Connection details</summary><dl class="session-list"><div><dt>Node</dt><dd id="nodeName">Not connected</dd></div><div><dt>Pool API</dt><dd id="poolVersion">--</dd></div><div><dt>Pool latency</dt><dd id="latency">-- ms</dd></div><div><dt>Batch time</dt><dd id="batchTime">-- ms</dd></div></dl></details>
+            <div class="section-divider"><span>LIFETIME</span></div>
+            <dl class="session-list lifetime-stats">
+              <div><dt>Total hashes</dt><dd id="lifetimeHashes">0</dd></div>
+              <div><dt>Accepted</dt><dd id="lifetimeGood">0</dd></div>
+              <div><dt>Rejected</dt><dd id="lifetimeBad">0</dd></div>
+            </dl>
+            <button id="resetStats" class="text-button" type="button">Reset session and lifetime stats</button>
           </section>
         </aside>
       </div>
 
-      <section class="panel log-panel" aria-labelledby="logTitle"><div class="panel-heading"><div><p class="section-kicker">ACTIVITY</p><h2 id="logTitle">Recent events</h2></div><button id="clearLog" class="text-button" type="button">Clear log</button></div><ol id="eventLog" class="event-log" aria-live="polite"><li><time>--:--:--</time><span class="log-type info">INFO</span><span>Miner is ready. Press Start to initialize WebGPU.</span></li></ol></section>
+      <section class="panel log-panel" aria-labelledby="logTitle">
+        <div class="panel-heading">
+          <div><p class="section-kicker">ACTIVITY</p><h2 id="logTitle">Recent events</h2></div>
+          <div class="panel-actions">
+            <button id="exportLog" class="text-button" type="button">Export log</button>
+            <button id="clearLog" class="text-button" type="button">Clear log</button>
+          </div>
+        </div>
+        <ol id="eventLog" class="event-log" aria-live="polite"><li><time>--:--:--</time><span class="log-type info">INFO</span><span>Miner is ready. Press Start to initialize WebGPU.</span></li></ol>
+      </section>
     </main>
 
     <footer><span>DUCO GPU Lab</span><span>SHA-1(previous hash + decimal nonce)</span><a href="https://duinocoin.com/getting-started.html" target="_blank" rel="noopener noreferrer">Duino-Coin guide</a></footer>
   </div>
+
+  <dialog id="helpDialog" class="help-dialog">
+    <div class="help-content">
+      <div class="panel-heading">
+        <div><p class="section-kicker">REFERENCE</p><h2>Keyboard shortcuts</h2></div>
+        <button id="closeHelp" class="text-button" type="button">Close</button>
+      </div>
+      <dl class="shortcut-list">
+        <div><dt><kbd>Space</kbd></dt><dd>Start or stop mining</dd></div>
+        <div><dt><kbd>Esc</kbd></dt><dd>Stop mining</dd></div>
+        <div><dt><kbd>R</kbd></dt><dd>Reset session and lifetime stats</dd></div>
+        <div><dt><kbd>C</kbd></dt><dd>Clear the event log</dd></div>
+        <div><dt><kbd>E</kbd></dt><dd>Export the event log as a text file</dd></div>
+        <div><dt><kbd>?</kbd></dt><dd>Show this help</dd></div>
+      </dl>
+      <p class="help-note">Shortcuts are disabled while typing in an input field.</p>
+    </div>
+  </dialog>
 </body>
 </html>
