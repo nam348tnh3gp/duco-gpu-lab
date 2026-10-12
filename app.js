@@ -1,19 +1,44 @@
 import { GpuHasher } from "./gpu.js";
 import { BatchTuner } from "./batch-tuner.js";
 
-const ids = ["gpuSupport", "gpuName", "startButton", "stopButton", "statusDot", "statusText", "hashrate", "rateUnit", "totalHashes", "goodShares", "badShares", "rateChart", "chartEmpty", "peakRate", "formulaInput", "sampleHash", "targetHash", "matchBadge", "difficulty", "currentNonce", "lastMatch", "latency", "batchTime", "username", "miningKey", "rigName", "batchSize", "autoBatch", "batchHint", "poolUrl", "nodeName", "poolVersion", "uptime", "lastShare", "acceptance", "eventLog", "clearLog"];
+const ids = [
+  "gpuSupport", "gpuName", "startButton", "stopButton", "statusDot", "statusText",
+  "hashrate", "rateUnit", "totalHashes", "goodShares", "badShares",
+  "rateChart", "chartEmpty", "peakRate",
+  "formulaInput", "sampleHash", "targetHash", "matchBadge",
+  "difficulty", "currentNonce", "lastMatch", "latency", "batchTime",
+  "username", "miningKey", "rigName", "batchSize", "autoBatch", "batchHint", "poolUrl",
+  "nodeName", "poolVersion", "uptime", "lastShare", "acceptance",
+  "eventLog", "clearLog",
+];
 const el = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
 const numberFormat = new Intl.NumberFormat("en-US");
-const credentialKeys = { username: "duco-gpu-lab.username", miningKey: "duco-gpu-lab.miningKey" };
+
+// Every setting the miner persists across reloads.
+const persistedSettings = {
+  username: "duco-gpu-lab.username",
+  miningKey: "duco-gpu-lab.miningKey",
+  rigName: "duco-gpu-lab.rigName",
+  poolUrl: "duco-gpu-lab.poolUrl",
+  batchSize: "duco-gpu-lab.batchSize",
+  autoBatch: "duco-gpu-lab.autoBatch",
+};
+
 const batchTuner = new BatchTuner([...el.batchSize.options].map(option => Number(option.value)));
 let adapterPromise = null;
 let webglModelCache = null;
+let wakeLock = null;
+let titleFlashTimer = 0;
+const BASE_TITLE = "DUCO GPU Lab";
+
 const state = {
   running: false, session: 0, hasher: null, requests: new Set(),
   startedAt: 0, lastShareAt: 0,
   totalHashes: 0, good: 0, bad: 0, rate: 0, peak: 0,
   rateSamples: Array(60).fill(0), latestJob: null,
 };
+
+/* ---------- GPU detection ---------- */
 
 function getMiningAdapter() {
   if (!navigator.gpu) return Promise.resolve(null);
@@ -57,7 +82,9 @@ function showGpuName(info) {
   const webglModel = webgpuModel ? "" : webglGpuModel(info);
   const name = webgpuModel || webglModel || [vendor, architecture].filter(Boolean).join(" ") || "GPU model unavailable";
   el.gpuName.textContent = name;
-  el.gpuName.title = webglModel ? `${name} (reported by WebGL; WebGPU: ${[vendor, architecture].filter(Boolean).join(" ")})` : name;
+  el.gpuName.title = webglModel
+    ? `${name} (reported by WebGL; WebGPU: ${[vendor, architecture].filter(Boolean).join(" ")})`
+    : name;
 }
 
 async function detectGpu() {
@@ -77,6 +104,8 @@ async function detectGpu() {
   }
 }
 
+/* ---------- UI helpers ---------- */
+
 function setStatus(text, kind = "idle") {
   el.statusText.textContent = text;
   el.statusDot.className = `status-dot ${kind}`;
@@ -94,6 +123,12 @@ function log(message, kind = "info") {
   row.append(time, type, detail);
   el.eventLog.prepend(row);
   while (el.eventLog.children.length > 80) el.eventLog.lastElementChild.remove();
+}
+
+function flashTitle(message) {
+  clearTimeout(titleFlashTimer);
+  document.title = message;
+  titleFlashTimer = setTimeout(() => { document.title = BASE_TITLE; }, 5000);
 }
 
 function shortRate(value) {
@@ -117,20 +152,88 @@ function formatHashCount(value) {
   return `${amount < 100 ? amount.toFixed(1) : amount.toFixed(0)}${units[index][1]}`;
 }
 
-function restoreCredentials() {
+/* ---------- Persistence ---------- */
+
+function restoreSettings() {
   try {
-    for (const [field, key] of Object.entries(credentialKeys)) {
+    for (const [field, key] of Object.entries(persistedSettings)) {
       const saved = localStorage.getItem(key);
-      if (saved !== null) el[field].value = saved;
+      if (saved === null) continue;
+      const input = el[field];
+      if (input.type === "checkbox") input.checked = saved === "true";
+      else if (saved) input.value = saved;
     }
-  } catch { /* Mining can still run when browser storage is unavailable. */ }
+  } catch { /* Storage may be unavailable; mining still works. */ }
 }
 
-function saveCredentials() {
+function saveSettings() {
   try {
-    for (const [field, key] of Object.entries(credentialKeys)) localStorage.setItem(key, el[field].value);
-  } catch { /* Mining can still run when browser storage is unavailable. */ }
+    for (const [field, key] of Object.entries(persistedSettings)) {
+      const input = el[field];
+      const value = input.type === "checkbox" ? String(input.checked) : input.value;
+      localStorage.setItem(key, value);
+    }
+  } catch { /* Storage may be unavailable; mining still works. */ }
 }
+
+/* ---------- Wake lock ---------- */
+
+async function acquireWakeLock() {
+  if (!state.running || wakeLock) return;
+  if (!("wakeLock" in navigator)) return;
+  try {
+    wakeLock = await navigator.wakeLock.request("screen");
+    wakeLock.addEventListener("release", () => { wakeLock = null; });
+  } catch (error) {
+    log(`Screen wake lock unavailable: ${error.message || "denied"}.`, "warn");
+  }
+}
+
+function releaseWakeLock() {
+  const lock = wakeLock;
+  wakeLock = null;
+  lock?.release().catch(() => {});
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (state.running && document.visibilityState === "visible") acquireWakeLock();
+});
+
+/* ---------- Clipboard ---------- */
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-copy]");
+  if (!button) return;
+  const source = document.getElementById(button.dataset.copy);
+  if (!source) return;
+  const text = source.textContent;
+  if (!text || /^(Waiting|No hash|Searching)/i.test(text)) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    button.textContent = "Copied";
+    button.classList.add("copied");
+    setTimeout(() => {
+      button.textContent = "Copy";
+      button.classList.remove("copied");
+    }, 1200);
+  } catch {
+    log("Clipboard access was denied by the browser.", "warn");
+  }
+});
+
+/* ---------- Keyboard shortcuts ---------- */
+
+document.addEventListener("keydown", (event) => {
+  if (event.target.closest("input, select, textarea, button, a, [contenteditable]")) return;
+  if (event.code === "Space") {
+    event.preventDefault();
+    if (state.running) stop(); else start();
+  } else if (event.key === "Escape" && state.running) {
+    stop();
+  }
+});
+
+/* ---------- Metrics and chart ---------- */
 
 function updateBatchHint() {
   el.batchHint.textContent = el.autoBatch.checked
@@ -141,6 +244,7 @@ function updateBatchHint() {
 function renderMetrics() {
   const [amount, unit] = shortRate(state.rate);
   el.hashrate.textContent = amount >= 100 ? amount.toFixed(0) : amount.toFixed(1);
+  el.hashrate.title = formatRate(state.rate);
   el.rateUnit.textContent = unit;
   el.totalHashes.textContent = formatHashCount(state.totalHashes);
   el.totalHashes.title = `${numberFormat.format(state.totalHashes)} hashes`;
@@ -187,13 +291,16 @@ function drawChart() {
 function tick() {
   if (state.startedAt && state.running) {
     const seconds = Math.floor((Date.now() - state.startedAt) / 1000);
-    el.uptime.textContent = [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60].map(value => String(value).padStart(2, "0")).join(":");
+    el.uptime.textContent = [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60]
+      .map(value => String(value).padStart(2, "0")).join(":");
   }
   if (state.lastShareAt) el.lastShare.textContent = `${Math.floor((Date.now() - state.lastShareAt) / 1000)} s ago`;
   state.rateSamples.push(state.running ? state.rate : 0);
   state.rateSamples.shift();
   drawChart();
 }
+
+/* ---------- Pool protocol ---------- */
 
 async function poolRequest(method, params) {
   const url = new URL("/legacy_job", el.poolUrl.value.trim());
@@ -230,12 +337,13 @@ function parseJob(message) {
   return { previous: fields[0], target: fields[1].toLowerCase(), difficulty };
 }
 
-async function verifyMatch(prefix, nonce, target) {
-  const bytes = new TextEncoder().encode(prefix + nonce);
+async function sha1Hex(text) {
+  const bytes = new TextEncoder().encode(text);
   const digest = await crypto.subtle.digest("SHA-1", bytes);
-  const hex = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
-  return hex === target.toLowerCase();
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
 }
+
+/* ---------- Mining loop ---------- */
 
 async function mineJob(job, session) {
   const maxNonce = job.difficulty * 100;
@@ -244,13 +352,12 @@ async function mineJob(job, session) {
   const started = performance.now();
   let lastDisplay = 0;
   let lastFinished = started;
-  // Two batches stay queued so the GPU starts the next one while JavaScript reads the last result.
   const queued = [];
   const queueBatch = () => {
     const selectedBatchSize = Number(el.batchSize.value);
     const count = Math.min(selectedBatchSize, maxNonce - nextNonce + 1);
     const result = state.hasher.hashBatch(job.previous, job.target, nextNonce, count);
-    result.catch(() => {}); // A batch left queued after a match or Stop is ignored.
+    result.catch(() => {});
     queued.push({ selectedBatchSize, count, result });
     nextNonce += count;
   };
@@ -266,13 +373,19 @@ async function mineJob(job, session) {
     lastFinished = finished;
     el.batchTime.textContent = `${Math.round(batchMs)} ms`;
     if (el.autoBatch.checked && Number(el.batchSize.value) === batch.selectedBatchSize && batch.count === batch.selectedBatchSize) {
-      el.batchSize.value = String(batchTuner.observe(batch.selectedBatchSize, batchMs));
+      const tuned = batchTuner.observe(batch.selectedBatchSize, batchMs);
+      if (tuned !== batch.selectedBatchSize) {
+        el.batchSize.value = String(tuned);
+        saveSettings();
+      }
     }
     attempted += result.count;
     state.totalHashes += result.count;
     const lastNonce = result.start + result.count - 1;
     const seconds = Math.max((finished - started) / 1000, 0.001);
-    state.rate = attempted / seconds;
+    // EMA keeps the reported rate from spiking at the start of every job.
+    const rawRate = attempted / seconds;
+    state.rate = state.rate > 0 ? state.rate * 0.55 + rawRate * 0.45 : rawRate;
     state.peak = Math.max(state.peak, state.rate);
     if (result.found !== null || lastNonce >= maxNonce || finished - lastDisplay >= 200) {
       el.currentNonce.textContent = numberFormat.format(lastNonce);
@@ -283,15 +396,17 @@ async function mineJob(job, session) {
       lastDisplay = finished;
     }
     if (result.found !== null) {
-      if (!await verifyMatch(job.previous, result.found, job.target)) throw new Error("GPU result failed independent SHA-1 verification.");
+      const matchedDigest = await sha1Hex(job.previous + result.found);
+      if (matchedDigest !== job.target) throw new Error("GPU result failed independent SHA-1 verification.");
       if (!state.running || session !== state.session) return null;
+      el.formulaInput.textContent = `${job.previous} + ${result.found}`;
+      el.sampleHash.textContent = matchedDigest;
       el.lastMatch.textContent = numberFormat.format(result.found);
       el.matchBadge.textContent = "MATCH FOUND";
       el.matchBadge.classList.add("matched");
       log(`GPU found nonce ${result.found}. SHA-1 matches the pool target.`, "good");
       return { nonce: result.found, rate: state.rate, seconds };
     }
-    // mapAsync already yields to the browser between batches.
   }
   if (!state.running || session !== state.session) return null;
   log("No matching nonce within the full difficulty range. Requesting a new job.", "warn");
@@ -321,7 +436,6 @@ async function runSession(session) {
         await new Promise(resolve => setTimeout(resolve, 500));
         continue;
       }
-
       const params = {
         ...poolIdentity(), r: solution.nonce, k: el.miningKey.value,
         s: `WebGPU Miner 1.0 (${el.rigName.value.trim() || "WebGPU-Lab"})`,
@@ -337,9 +451,11 @@ async function runSession(session) {
       if (verdict === "GOOD" || verdict === "BLOCK") {
         state.good++;
         log(verdict === "BLOCK" ? "Pool accepted a block." : "Pool accepted the share.", "good");
+        if (document.visibilityState === "hidden") flashTitle("✓ Share accepted");
       } else if (verdict.startsWith("BAD")) {
         state.bad++;
         log(`Pool rejected the share: ${verdict.slice(4) || "no reason given"}.`, "bad");
+        if (document.visibilityState === "hidden") flashTitle("✕ Share rejected");
       } else {
         log(`Unexpected pool verdict: ${verdict.slice(0, 120)}`, "warn");
       }
@@ -347,7 +463,10 @@ async function runSession(session) {
       await new Promise(resolve => setTimeout(resolve, 500));
     } catch (error) {
       if (!state.running || session !== state.session) return;
-      if (/GPU|shader|invalid mining job|invalid difficulty|difficulty exceeds|SHA-1 verification/i.test(error.message)) { fail(error); return; }
+      if (/GPU|shader|invalid mining job|invalid difficulty|difficulty exceeds|SHA-1 verification/i.test(error.message)) {
+        fail(error);
+        return;
+      }
       retryCount++;
       const delay = Math.min(retryCount * retryCount, 30) * 1000;
       state.rate = 0;
@@ -365,6 +484,8 @@ function fail(error) {
   setStatus(error.message || "Mining stopped after an error", "error");
 }
 
+/* ---------- Start / stop ---------- */
+
 async function start() {
   if (state.running) return;
   const username = el.username.value.trim();
@@ -376,10 +497,15 @@ async function start() {
   if (/[,\r\n]/.test(el.rigName.value)) { fail(new Error("Rig name cannot contain commas or line breaks.")); return; }
   try {
     const endpoint = new URL(el.poolUrl.value.trim());
-    if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error();
-  } catch { fail(new Error("Enter a valid pool API URL beginning with https://.")); return; }
+    if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+      throw new Error();
+    }
+  } catch {
+    fail(new Error("Enter a valid pool API URL beginning with https://."));
+    return;
+  }
   el.username.value = username;
-  saveCredentials();
+  saveSettings();
   state.running = true;
   document.body.classList.add("mining");
   const session = ++state.session;
@@ -396,6 +522,8 @@ async function start() {
   el.currentNonce.textContent = "0";
   el.lastMatch.textContent = "None yet";
   el.chartEmpty.hidden = false;
+  el.matchBadge.textContent = "WAITING";
+  el.matchBadge.classList.remove("matched");
   renderMetrics();
   el.nodeName.textContent = new URL(el.poolUrl.value.trim()).host;
   el.poolVersion.textContent = "--";
@@ -404,6 +532,7 @@ async function start() {
   for (const field of [el.username, el.miningKey, el.rigName, el.poolUrl]) field.disabled = true;
   setStatus("Initializing WebGPU", "working");
   log("Requesting high-performance WebGPU adapter and running SHA-1 self-test.");
+  acquireWakeLock();
   try {
     if (!state.hasher) state.hasher = await GpuHasher.create(await getMiningAdapter());
     if (!state.running || session !== state.session) return;
@@ -419,10 +548,13 @@ async function start() {
     });
     log(`Connecting to ${el.nodeName.textContent} with the Mini Miner HTTP protocol.`);
     runSession(session);
-  } catch (error) { if (state.running && session === state.session) fail(error); }
+  } catch (error) {
+    if (state.running && session === state.session) fail(error);
+  }
 }
 
 function stop() {
+  if (!state.running) return;
   state.running = false;
   document.body.classList.remove("mining");
   state.session++;
@@ -434,16 +566,32 @@ function stop() {
   for (const field of [el.username, el.miningKey, el.rigName, el.poolUrl]) field.disabled = false;
   setStatus("Stopped", "idle");
   log("Mining stopped.");
+  releaseWakeLock();
 }
+
+/* ---------- Wiring ---------- */
 
 el.startButton.addEventListener("click", start);
 el.stopButton.addEventListener("click", stop);
-el.autoBatch.addEventListener("change", () => { batchTuner.reset(); updateBatchHint(); });
-el.batchSize.addEventListener("change", () => { el.autoBatch.checked = false; batchTuner.reset(); updateBatchHint(); });
-for (const field of [el.username, el.miningKey]) field.addEventListener("input", saveCredentials);
+el.autoBatch.addEventListener("change", () => { batchTuner.reset(); updateBatchHint(); saveSettings(); });
+el.batchSize.addEventListener("change", () => {
+  el.autoBatch.checked = false;
+  batchTuner.reset();
+  updateBatchHint();
+  saveSettings();
+});
+for (const field of ["username", "miningKey", "rigName", "poolUrl"]) {
+  el[field].addEventListener("input", saveSettings);
+}
 el.clearLog.addEventListener("click", () => { el.eventLog.replaceChildren(); log("Event log cleared."); });
 window.addEventListener("resize", drawChart);
-restoreCredentials();
+window.addEventListener("beforeunload", (event) => {
+  if (!state.running) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
+
+restoreSettings();
 updateBatchHint();
 el.gpuSupport.textContent = navigator.gpu ? "WEBGPU AVAILABLE" : "WEBGPU UNAVAILABLE";
 el.gpuSupport.classList.toggle("supported", Boolean(navigator.gpu));

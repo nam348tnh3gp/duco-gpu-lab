@@ -30,10 +30,11 @@
         </div>
         <div class="intro-controls">
           <div class="hero-actions">
-            <button id="startButton" class="primary-button" type="button">Start mining</button>
-            <button id="stopButton" class="secondary-button" type="button" disabled>Stop</button>
+            <button id="startButton" class="primary-button" type="button" title="Start mining (Space)">Start mining</button>
+            <button id="stopButton" class="secondary-button" type="button" disabled title="Stop mining (Space or Esc)">Stop</button>
           </div>
           <div class="session-state" role="status" aria-live="polite"><span id="statusDot" class="status-dot"></span><span id="statusText">Ready to mine</span></div>
+          <small class="shortcut-hint">Press <kbd>Space</kbd> to start or stop, <kbd>Esc</kbd> to stop.</small>
         </div>
       </section>
 
@@ -58,10 +59,31 @@
             <div class="calculation-content">
               <p class="calculation-intro">The GPU hashes the previous value with each decimal nonce. A share is submitted when the result matches the target.</p>
               <div class="formula-flow" aria-label="SHA-1 input and comparison">
-                <div class="formula-box"><span>PREVIOUS HASH + NONCE</span><code id="formulaInput">Waiting for a job</code></div>
-                <div class="formula-box"><span>SHA-1 RESULT</span><code id="sampleHash">No hash yet</code></div>
+                <div class="formula-box">
+                  <div class="formula-header">
+                    <span>PREVIOUS HASH + NONCE</span>
+                    <button class="copy-icon" type="button" data-copy="formulaInput" aria-label="Copy input to clipboard">Copy</button>
+                  </div>
+                  <code id="formulaInput">Waiting for a job</code>
+                </div>
+                <div class="formula-box">
+                  <div class="formula-header">
+                    <span>SHA-1 RESULT</span>
+                    <button class="copy-icon" type="button" data-copy="sampleHash" aria-label="Copy SHA-1 result to clipboard">Copy</button>
+                  </div>
+                  <code id="sampleHash">No hash yet</code>
+                </div>
               </div>
-              <div class="target-box"><div><span class="target-label">TARGET HASH</span><code id="targetHash">Waiting for a job</code></div><span id="matchBadge" class="match-badge">WAITING</span></div>
+              <div class="target-box">
+                <div class="target-content">
+                  <div class="formula-header">
+                    <span class="target-label">TARGET HASH</span>
+                    <button class="copy-icon" type="button" data-copy="targetHash" aria-label="Copy target hash to clipboard">Copy</button>
+                  </div>
+                  <code id="targetHash">Waiting for a job</code>
+                </div>
+                <span id="matchBadge" class="match-badge">WAITING</span>
+              </div>
             </div>
           </details>
         </div>
@@ -73,7 +95,7 @@
             <div class="field"><label for="miningKey">Mining key (optional)</label><input id="miningKey" name="miningKey" type="password" autocomplete="off" spellcheck="false" maxlength="128"><small>Only needed if your account uses a mining key.</small></div>
             <div class="field"><label for="batchSize">GPU batch size</label><div class="batch-control-row"><select id="batchSize" aria-describedby="batchHint"><option value="65536">65,536 hashes, light</option><option value="262144">262,144 hashes, moderate</option><option value="1048576">1,048,576 hashes</option><option value="4194304">4,194,304 hashes</option><option value="8388480">8,388,480 hashes</option><option value="16776960" selected>16,776,960 hashes, conservative</option><option value="33553920">33,553,920 hashes</option><option value="67107840">67,107,840 hashes</option><option value="100661760">100,661,760 hashes</option><option value="134215680">134,215,680 hashes</option><option value="201323520">201,323,520 hashes</option><option value="268431360">268,431,360 hashes, powerful GPU</option><option value="536862720">536,862,720 hashes, very fast GPU</option></select><label class="auto-batch-toggle"><input id="autoBatch" type="checkbox" aria-describedby="batchHint" checked><span>Auto</span></label></div><small id="batchHint">Auto adjusts the selected size toward 55 to 95 ms per full batch. Stop waits for the current batch.</small></div>
             <details class="advanced"><summary>More settings</summary><div class="field"><label for="rigName">Rig name</label><input id="rigName" name="rigName" value="WebGPU-Lab" maxlength="32" spellcheck="false"></div><div class="field"><label for="poolUrl">Pool API URL</label><input id="poolUrl" name="poolUrl" value="https://server.duinocoin.com" spellcheck="false"></div></details>
-            <p class="setup-note">Enter a username, then press Start. Username and mining key are saved in this browser.</p>
+            <p class="setup-note">Enter a username, then press Start. All settings are saved in this browser.</p>
           </section>
 
           <section class="panel session-panel" aria-labelledby="sessionTitle">
